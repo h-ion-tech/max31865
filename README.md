@@ -1,3 +1,9 @@
+# HION part
+
+This id a forked repo, the original can be found at https://github.com/nimaltd/max31865.git
+
+To use the driver, you must use the SUBMODULE_MAX31865_DRIVER in the project's prjdef.h
+
 # MAX31865 Library
 
 * http://www.github.com/NimaLTD   

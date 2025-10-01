@@ -1,4 +1,8 @@
 
+
+#include "prjdef.h"
+#if defined(SUBMODULE_MAX31865_DRIVER)
+
 #include <math.h>
 #include "max31865.h"
 #include "max31865Conf.h"
@@ -231,3 +235,4 @@ float Max31865_Filter(float	newInput, float	lastOutput, float efectiveFactor)
 }
 //#########################################################################################################################
 
+#endif //SUBMODULE_ADC_DRIVER
