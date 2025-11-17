@@ -1,14 +1,10 @@
-
-
-#include "prjdef.h"
-#if defined(SUBMODULE_MAX31865_DRIVER)
-
 #include <math.h>
-#include "max31865.h"
-#include "max31865Conf.h"
+#include "MAX31865.h"
+#include "MAX31865Conf.h"
 #if (_MAX31865_USE_FREERTOS == 1)
 #include "cmsis_os.h"
 #endif
+#include "shared/shared.h"
 //#########################################################################################################################
 #define MAX31856_CONFIG_REG             0x00
 #define MAX31856_CONFIG_BIAS            0x80
@@ -151,7 +147,27 @@ uint16_t Max31865_readRTD (Max31865_t *max31865)
 	uint8_t t = Max31865_readRegister8(max31865, MAX31856_CONFIG_REG);
 	t |= MAX31856_CONFIG_1SHOT;
 	Max31865_writeRegister8(max31865, MAX31856_CONFIG_REG, t);
-	Max31865_delay(65);
+	Max31865_delay(20);
+	uint16_t rtd = Max31865_readRegister16(max31865, MAX31856_RTDMSB_REG);
+	rtd >>= 1;
+	return rtd;
+}
+
+void Max31865_SEQ1_ClearFaultEnBias (Max31865_t *max31865)
+{
+	Max31865_clearFault(max31865);
+	Max31865_enableBias(max31865, 1);
+}
+
+void Max31865_SEQ2_ConfigOneShotMeasure (Max31865_t *max31865)
+{
+	uint8_t t = Max31865_readRegister8(max31865, MAX31856_CONFIG_REG);
+	t |= MAX31856_CONFIG_1SHOT;
+	Max31865_writeRegister8(max31865, MAX31856_CONFIG_REG, t);
+}
+
+uint16_t Max31865_SEQ3_ReadRawValue (Max31865_t *max31865)
+{
 	uint16_t rtd = Max31865_readRegister16(max31865, MAX31856_RTDMSB_REG);
 	rtd >>= 1;
 	return rtd;
@@ -161,6 +177,7 @@ uint16_t Max31865_readRTD (Max31865_t *max31865)
 //#########################################################################################################################
 void  Max31865_init(Max31865_t *max31865,SPI_HandleTypeDef *spi,GPIO_TypeDef  *cs_gpio,uint16_t cs_pin,uint8_t  numwires, uint8_t filterHz)
 {
+  wdr_reset();
   if(max31865->lock == 1)
     Max31865_delay(1);
   max31865->lock = 1;
@@ -176,6 +193,25 @@ void  Max31865_init(Max31865_t *max31865,SPI_HandleTypeDef *spi,GPIO_TypeDef  *c
   Max31865_setFilter(max31865, filterHz);  
 }
 //#########################################################################################################################
+bool Max31865_readRes(Max31865_t *max31865,float *readRes)
+{
+  if(max31865->lock == 1)
+    Max31865_delay(30);
+  max31865->lock = 1;
+  float Rt;
+  bool isOk = false;
+	Rt = Max31865_readRTD(max31865);
+	Rt /= 32768;
+	Rt *= _MAX31865_RREF;
+	*readRes = Rt;
+
+  if(Max31865_readFault(max31865) == 0)
+    isOk = true;
+  max31865->lock = 0;
+  return isOk;
+}
+
+
 bool Max31865_readTempC(Max31865_t *max31865,float *readTemp)
 {
   if(max31865->lock == 1)
@@ -183,43 +219,41 @@ bool Max31865_readTempC(Max31865_t *max31865,float *readTemp)
   max31865->lock = 1;
   bool isOk = false;
   float Z1, Z2, Z3, Z4, Rt, temp;
-	Rt = Max31865_readRTD(max31865);
-	Rt /= 32768;
-	Rt *= _MAX31865_RREF;
-	Z1 = -RTD_A;
-	Z2 = RTD_A * RTD_A - (4 * RTD_B);
-	Z3 = (4 * RTD_B) / _MAX31865_RNOMINAL;
-	Z4 = 2 * RTD_B;
-	temp = Z2 + (Z3 * Rt);
-	temp = (sqrtf(temp) + Z1) / Z4;
+	//Rt = Max31865_readRTD(max31865);
 
-	if (temp >= 0)
-  {
-    *readTemp = temp; 
-    if(Max31865_readFault(max31865) == 0)
-      isOk = true;        
-    max31865->lock = 0;
-    return isOk;
-  }
-	Rt /= _MAX31865_RNOMINAL;
-	Rt *= 100;    
-	float rpoly = Rt;
-	temp = -242.02;
-	temp += 2.2228 * rpoly;
-	rpoly *= Rt;  // square
-	temp += 2.5859e-3 * rpoly;
-	rpoly *= Rt;  // ^3
-	temp -= 4.8260e-6 * rpoly;
-	rpoly *= Rt;  // ^4
-	temp -= 2.8183e-8 * rpoly;
-	rpoly *= Rt;  // ^5
-	temp += 1.5243e-10 * rpoly;
-
-  *readTemp = temp; 
   if(Max31865_readFault(max31865) == 0)
-    isOk = true;        
-  max31865->lock = 0;
-  return isOk;  
+  {
+    isOk = true;
+    max31865->lock = 0;
+    Rt = Max31865_SEQ3_ReadRawValue(max31865);
+    Rt /= 32768;
+    Rt *= _MAX31865_RREF;
+    Z1 = -RTD_A;
+    Z2 = RTD_A * RTD_A - (4 * RTD_B);
+    Z3 = (4 * RTD_B) / _MAX31865_RNOMINAL;
+    Z4 = 2 * RTD_B;
+    temp = Z2 + (Z3 * Rt);
+    temp = (sqrtf(temp) + Z1) / Z4;
+
+    if (temp < 0)
+    {
+      Rt /= _MAX31865_RNOMINAL;
+      Rt *= 100;
+      float rpoly = Rt;
+      temp = -242.02;
+      temp += 2.2228 * rpoly;
+      rpoly *= Rt;  // square
+      temp += 2.5859e-3 * rpoly;
+      rpoly *= Rt;  // ^3
+      temp -= 4.8260e-6 * rpoly;
+      rpoly *= Rt;  // ^4
+      temp -= 2.8183e-8 * rpoly;
+      rpoly *= Rt;  // ^5
+      temp += 1.5243e-10 * rpoly;
+    }
+    *readTemp = temp;
+  }
+  return isOk;
 }
 //#########################################################################################################################
 bool  Max31865_readTempF(Max31865_t *max31865,float *readTemp)
@@ -234,5 +268,3 @@ float Max31865_Filter(float	newInput, float	lastOutput, float efectiveFactor)
 	return ((float)lastOutput*(1.0f-efectiveFactor)) + ((float)newInput*efectiveFactor) ;
 }
 //#########################################################################################################################
-
-#endif //SUBMODULE_ADC_DRIVER
