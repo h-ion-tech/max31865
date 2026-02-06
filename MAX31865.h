@@ -40,9 +40,16 @@ bool  Max31865_readTempC(Max31865_t *max31865,float *readTemp);
 bool  Max31865_readTempF(Max31865_t *max31865,float *readTemp);
 float Max31865_Filter(float	newInput, float	lastOutput, float efectiveFactor);
 
+uint8_t  Max31865_readFault(Max31865_t *max31865);
+void     Max31865_clearFault(Max31865_t *max31865);
+void     Max31865_enableBias(Max31865_t *max31865, uint8_t enable);
+
 void Max31865_SEQ1_ClearFaultEnBias (Max31865_t *max31865);
 void Max31865_SEQ2_ConfigOneShotMeasure (Max31865_t *max31865);
 uint16_t Max31865_SEQ3_ReadRawValue (Max31865_t *max31865);
+
+bool Max31865_setHighFaultThreshold(Max31865_t *max31865, float highTempC);
+bool Max31865_setLowFaultThreshold(Max31865_t *max31865, float lowTempC);
 
 //#########################################################################################################################
 #ifdef __cplusplus

@@ -127,6 +127,8 @@ void Max31865_setWires(Max31865_t *max31865, uint8_t numWires)
 	else
 		t &= ~MAX31856_CONFIG_3WIRE;
 	Max31865_writeRegister8(max31865, MAX31856_CONFIG_REG, t);
+
+	uint8_t res = Max31865_readRegister8(max31865, MAX31856_CONFIG_REG);
 }
 //#########################################################################################################################
 void Max31865_setFilter(Max31865_t *max31865, uint8_t filterHz)
@@ -254,6 +256,79 @@ bool Max31865_readTempC(Max31865_t *max31865,float *readTemp)
     *readTemp = temp;
   }
   return isOk;
+}
+
+static float Max31865_tempCToResistance(float tempC)
+{
+	/* Callendar–Van Dusen for platinum RTD (PT100/PT1000), R0 = _MAX31865_RNOMINAL */
+	const float R0 = (float)_MAX31865_RNOMINAL;
+
+	if (tempC >= 0.0f)
+	{
+		return R0 * (1.0f + (RTD_A * tempC) + (RTD_B * tempC * tempC));
+	}
+
+	/* For T < 0°C include the C term */
+	const float t2 = tempC * tempC;
+	const float t3 = t2 * tempC;
+	return R0 * (1.0f + (RTD_A * tempC) + (RTD_B * t2) + (RTD_C * (tempC - 100.0f) * t3));
+}
+
+static uint16_t Max31865_resistanceToCode15(float Rt)
+{
+	/* RTD code is 15-bit: code = (Rt / Rref) * 32768 */
+	float code_f = (Rt * 32768.0f) / (float)_MAX31865_RREF;
+
+	if (code_f < 0.0f)
+		code_f = 0.0f;
+	if (code_f > 32767.0f)
+		code_f = 32767.0f;
+
+	return (uint16_t)(code_f + 0.5f);
+}
+
+static bool Max31865_writeThreshold(Max31865_t *max31865, uint8_t msbReg, uint8_t lsbReg, float tempC)
+{
+	const float Rt = Max31865_tempCToResistance(tempC);
+	const uint16_t code15 = Max31865_resistanceToCode15(Rt);
+
+	/* Threshold registers store the same format as RTD register: left-aligned, bit0 reserved */
+	const uint16_t regVal = (uint16_t)(code15 << 1);
+
+	Max31865_writeRegister8(max31865, msbReg, (uint8_t)(regVal >> 8));
+	Max31865_writeRegister8(max31865, lsbReg, (uint8_t)(regVal & 0xFF));
+
+	/* Best-effort verify */
+	{
+		const uint16_t rb = Max31865_readRegister16(max31865, msbReg);
+		return ((rb & 0xFFFEu) == (regVal & 0xFFFEu));
+	}
+}
+
+bool Max31865_setLowFaultThreshold(Max31865_t *max31865, float lowTempC)
+{
+	if (max31865->lock == 1)
+		Max31865_delay(1);
+	max31865->lock = 1;
+
+	Max31865_clearFault(max31865);
+	const bool ok = Max31865_writeThreshold(max31865, MAX31856_LFAULTMSB_REG, MAX31856_LFAULTLSB_REG, lowTempC);
+
+	max31865->lock = 0;
+	return ok;
+}
+
+bool Max31865_setHighFaultThreshold(Max31865_t *max31865, float highTempC)
+{
+	if (max31865->lock == 1)
+		Max31865_delay(1);
+	max31865->lock = 1;
+
+	Max31865_clearFault(max31865);
+	const bool ok = Max31865_writeThreshold(max31865, MAX31856_HFAULTMSB_REG, MAX31856_HFAULTLSB_REG, highTempC);
+
+	max31865->lock = 0;
+	return ok;
 }
 //#########################################################################################################################
 bool  Max31865_readTempF(Max31865_t *max31865,float *readTemp)
